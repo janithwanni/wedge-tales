@@ -23,6 +23,7 @@
 	},
 	"dependencies": {
 		"@tailwindcss/typography": "^0.5.15",
-		"leaflet": "^1.9.4"
+		"mapbox-gl": "^3.9.0",
+		"three": "^0.171.0"
 	}
 }
