@@ -1,105 +1,67 @@
 <script>
   import {onMount, onDestroy} from 'svelte';
   import { writable } from 'svelte/store';
-  import * as THREE from 'three';
+	import MapPin from '$lib/components/MapPin.svelte';
+  import { initThreeScene, syncClickedBuildings, syncMarker } from '$lib/scene-setup.svelte.js';
+
   let { data } = $props();
   let accessToken = data.accessToken;
   
-  
   let mapContainer;
-  let latInput = $state('-37.909');
-  let lngInput = $state('145.130');
+  let searchBoxContainer;
+  
   let marker;
+  let map = $state(undefined);
+
   let dropMarker = $state(undefined);
-  let scene, camera, renderer, buildingObjects = [], markerObject;
-  const markerPosition = writable(null);
+  
+  let markerPosition = $state([]); // [lat, lng]
+
+  const sceneMarker = writable(null);
   const clickedBuildings = writable([]);
   const highlightedFeatures = writable([]);
 
-  const initThreeScene = () => {
-    const threeCanvas = document.getElementById('three-canvas');
-
-    scene = new THREE.Scene();
-
-    camera = new THREE.PerspectiveCamera(75, threeCanvas.offsetWidth / threeCanvas.offsetHeight, 0.1, 1000);
-    camera.position.z = 50;
-
-    renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
-    renderer.setSize(threeCanvas.offsetWidth, threeCanvas.offsetHeight);
-
-    // Lighting
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(10, 10, 10).normalize();
-    scene.add(light);
-
-    // Animation Loop
-    const animate = () => {
-      requestAnimationFrame(animate);
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    // Sync building data
-    syncClickedBuildings();
-    syncMarker();
-  };
-
-  const syncClickedBuildings = () => {
-    clickedBuildings.subscribe((buildings) => {
-      // Clear existing objects
-      buildingObjects.forEach((obj) => scene.remove(obj));
-      buildingObjects = [];
-
-      // Add new building objects
-      buildings.forEach((building) => {
-        
-        const geometry = new THREE.BoxGeometry(10, 10, building.height || 10);
-        const material = new THREE.MeshStandardMaterial({ color: 0x0077ff });
-        const buildingMesh = new THREE.Mesh(geometry, material);
-
-        // Position the building (convert lat/lng to arbitrary 3D coords)
-        buildingMesh.position.set(
-          building.location[0] * 0.1, // Scale longitude for scene
-          building.location[1] * 0.1, // Scale latitude for scene
-          building.height / 2 || 5 // Center the building height
-        );
-
-        scene.add(buildingMesh);
-        buildingObjects.push(buildingMesh);
-      });
-      console.log('Building objects added to scene:', buildingObjects);
-    });
-  };
-
-  const syncMarker = () => {
-    markerPosition.subscribe((position) => {
-      if (!position) return;
-
-      // Remove existing marker object
-      if (markerObject) {
-        scene.remove(markerObject);
+  $effect(() => {
+    if(map !== undefined && markerPosition.length == 2) {
+      // map is set and marker is set
+      if (marker) {
+        marker.remove();
       }
 
-      // Add new marker object
-      const geometry = new THREE.SphereGeometry(5, 32, 32);
-      const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-      markerObject = new THREE.Mesh(geometry, material);
+      // Add new marker
+      marker = new mapboxgl.Marker()
+        .setLngLat([markerPosition[1], markerPosition[0]])
+        .addTo(map);
 
-      markerObject.position.set(
-        position.longitude * 0.1, // Scale longitude for scene
-        position.latitude * 0.1,  // Scale latitude for scene
-        5 // Arbitrary height
-      );
+      // Center the map on the new marker
+      map.flyTo({
+        center: [markerPosition[1], markerPosition[0]],
+        zoom: 15,
+        essential: true,
+      });
 
-      scene.add(markerObject);
-      console.log('Marker added to scene:', markerObject);
-    });
-  };
+      syncMarker(markerPosition)
+    }
+  })
+  
 
-  onMount(() => {
-    console.log(accessToken)
+  let getCurrentLocation = () => {
+    console.log("fired event");
+    if("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        console.log(position)
+        const {latitude, longitude} = position.coords;
+
+        markerPosition = [latitude, longitude];
+      })
+    } else {
+      console.log("Can't get current location")
+    }
+  }
+
+  onMount(async () => {
     mapboxgl.accessToken = accessToken;
-    const map = new mapboxgl.Map({
+    map = new mapboxgl.Map({
       container: 'map', // container I
       style: 'mapbox://styles/mapbox/light-v11',
       center: [145.130, -37.909],
@@ -110,9 +72,24 @@
       antialias: true
     });
 
-    initThreeScene();
-    
 
+    const searchBoxElement = new mapboxsearch.MapboxSearchBox()
+    searchBoxElement.accessToken = accessToken;
+    searchBoxElement.options = {
+      language: 'en',
+    }
+
+    searchBoxElement.addEventListener("retrieve", (event) => {
+      console.log(event.detail.features[0].geometry);
+      const [searchLng, searchLat] = event.detail.features[0].geometry.coordinates;
+      console.log("Setting markerPosition to", searchLat, searchLng)
+      markerPosition = [searchLat, searchLng];
+    })
+    searchBoxContainer.appendChild(searchBoxElement);
+
+    initThreeScene();
+    // Sync building data
+    
     map.on('style.load', () => {
         // Insert the layer beneath any symbol layer.
         const layers = map.getStyle().layers;
@@ -191,7 +168,7 @@
         const building = features[0]; // Get the first feature
         const { height, min_height } = building.properties;
         const { coordinates } = building.geometry;
-
+        console.log("got new building", building);
         // Update highlighted features list
         highlightedFeatures.update((featuresList) => {
           const exists = featuresList.find((f) => f.id === building.id);
@@ -204,8 +181,8 @@
             return featuresList.filter((f) => f.id !== building.id);
           } else {
             // Add the building to highlights
-            console.log(building)
             clickedBuildings.update((list) => {
+              console.log("adding building with coordinates", coordinates)
                 return [
                   ...list,
                   {
@@ -219,6 +196,7 @@
             return [...featuresList, building];
           }
         });
+        syncClickedBuildings(clickedBuildings);
 
         // Update the highlight layer's data
         highlightedFeatures.subscribe((featuresList) => {
@@ -232,73 +210,65 @@
         console.log('No building clicked');
       }
     });
-
-    dropMarker = () => {
-      const latitude = parseFloat(latInput);
-      const longitude = parseFloat(lngInput);
-
-      if (!isNaN(latitude) && !isNaN(longitude)) {
-        // Remove existing marker if any
-        if (marker) {
-          marker.remove();
-        }
-
-        // Add new marker
-        marker = new mapboxgl.Marker()
-          .setLngLat([longitude, latitude])
-          .addTo(map);
-
-        markerPosition.set({ latitude, longitude });
-
-        // Center the map on the new marker
-        map.flyTo({
-          center: [longitude, latitude],
-          zoom: 15,
-          essential: true,
-        });
-      } else {
-        alert('Please enter valid latitude and longitude.');
-      }
-    };
   })
 </script>
 
-<div class = "container h-screen mx-auto px-4 py-12 grid grid-cols-6 grid-rows-4 grid-flow-row gap-4">
-    <div class = "h-full w-full col-span-6 row-span-3" id='map' bind:this="{mapContainer}"></div>
+<div class = "container h-screen mx-auto px-4 py-6 flex flex-col">
+
+    <div class="text-3xl basis-1/12 text-green-600">Wedge Tales</div>
+
+    <div class="text-lg text-gray-500"><span class = "text-base font-bold text-white bg-green-600 border-4 border-green-600 border-solid rounded-full mr-4 inline-flex justify-center items-center w-fit min-w-12 aspect-square"> 1 </span>Enter details of the station</div>
+
+    
+    
+    <div id = "station-name-controls" class="basis-1/12 text-6xl py-4">
+      <input 
+        class = "border-b-2 border-solid border-gray-200 rounded-md px-1"
+        type = "text"
+        placeholder="My new weather station" /> located at
+    </div>
+
+    <div id = "station-location-controls" class="py-4 basis-1/12">
+      <span class = "min-w-96 pr-8 inline-block" bind:this={searchBoxContainer}></span>
+      <button aria-label="Set Current Location" onclick={getCurrentLocation}> 
+        <MapPin label="Use my location"/>
+      </button>
+    </div>
+
+    <div class = "pb-4 flex flex-row">
+      <label for="latinput" class="mr-4"> Latitude </label>
+      <input
+        class = "border-b-2 border-solid border-gray-200 rounded-md px-1 mx-2"
+        type="text"
+        placeholder="Enter Latitude"
+        bind:value={markerPosition[0]}
+      />
+
+      <label for="lnginput" class="mr-4">Longitude</label>
+      <input
+        class = "border-b-2 border-solid border-gray-200 rounded-md px-1 mx-2"
+        type="text"
+        placeholder="Enter Longitude"
+        bind:value={markerPosition[1]}
+      />
+    </div>
 
     <div>
-      Metadata area
-      
-      <div class="controls">
-        <input
-          type="text"
-          placeholder="Enter Latitude"
-          bind:value={latInput}
-        />
-        <input
-          type="text"
-          placeholder="Enter Longitude"
-          bind:value={lngInput}
-        />
-        <button onclick={dropMarker}>Drop Marker</button>
-      </div>
+      <button class="bg-sky-600 text-white py-2 px-8 rounded-md"> Save </button>
     </div>
-    <div class = "col-span-3">
-      <canvas id="three-canvas"></canvas>
-    </div>
-    <div>List of obstructions
 
-      <ul>
-        {#each $clickedBuildings as building, index}
-          <li>
-            <strong>Building {index + 1}:</strong><br />
-            Location: {JSON.stringify(building.location).substring(0, 100) + "..."}<br />
-            Height: {building.height} meters<br />
-            Base Height: {building.baseHeight} meters
-          </li>
-        {/each}
-      </ul>
+    <div class="text-gray-500 text-lg pt-6"><span class = "text-base text-white font-bold bg-green-600 border-4 border-green-600 border-solid rounded-full mr-4 inline-flex justify-center items-center w-fit min-w-12 aspect-square"> 2 </span>Select obstructions around weather station</div>
 
+
+
+    <!-- <div id = "carousel-controls" class="ml-auto mr-auto">
+      <button class="bg-sky-600 text-white py-2 px-4 rounded-md"> Map View </button>
+      <button class="bg-sky-600 text-white py-2 px-4 rounded-md"> Scene View </button>
+    </div> -->
+
+    <div id = "carousel" class="flex flex-row grow py-8">
+      <div id='map' class="w-screen min-h-64" bind:this="{mapContainer}"></div>
+      <div id = "threejs-scene" class="w-screen min-h-64"><canvas id = "three-canvas"></canvas></div>
     </div>
   
 </div>
