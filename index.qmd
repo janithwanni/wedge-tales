@@ -1,0 +1,30 @@
+---
+title: "Documentation"
+--- 
+
+# Structure of the application
+
+First and foremost this application is not built with Shiny. It was built with Svelte which is a framework for developing web applications using Javascript and HTML. Hence any computation that needs to be done will most likely either be done on Javascript or a separate API written in either R or Python.      
+
+## Running the application locally
+
+To run the application locally, `node` and `npm` must be installed. For further information on setting up `node` and `npm` check out [this link here](#).    
+After installing node and npm, run `npm install` on the base folder to setup the packages for Svelte. The application can be run after setting up the packages by running the command `npm run dev`. 
+To get the Mapbox tiles to work a `.env` file needs to be created containing the authentication token for Mapbox. Contact the maintainers of this repo for a key or use your own key as needed.    
+
+
+# Structure of the data 
+
+Mapbox delivers buildings as a JSON containing polygon endpoints and height.    
+
+We are aiming to contain all the data generated in this project in a geoJSON format that can be used by a majority of geospatial industry tools.    
+
+# Appendix
+
+Technological Stack
+
+- Svelte 5 is used as the web framework.
+- Tailwind CSS is used as the framework instead of bootstrap, mainly because I wanted to learn it and also for its flexibility in defining custom components. 
+- Mapbox is used for displaying the map component. Mapbox allows us to use Vector tiles that shows buildings out of the box. The only issue is that Mapbox has a free tier with a limit. Exceeding the free tier does not incur huge costs (less than $10) but it is best to keep in mind as development goes.
+- THREE.js was used to display the 3D view of the buildings which might be deprecated in favor of a 2D view of the obstructions.
+
